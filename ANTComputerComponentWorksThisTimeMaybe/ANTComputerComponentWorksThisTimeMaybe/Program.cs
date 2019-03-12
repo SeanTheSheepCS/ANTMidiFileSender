@@ -64,6 +64,7 @@ namespace Program
         static System.IO.BinaryReader midiFileReader;
         static bool taskInProgress;
         static byte lastInstructionType;
+        static long numOfBytesLeftInMessage;
         static long waitTime;
 
 
@@ -684,7 +685,7 @@ namespace Program
                 else
                 {
                     txBuffer[0] = midiFileReader.ReadByte();
-                    byte temp = (byte)(txBuffer[0] & 0x10);
+                    byte temp = (byte)(txBuffer[0] & 0xF0);
                     if (txBuffer[0] == 0x4D)
                     {
                         readCommandStartingWith4D();
@@ -700,7 +701,7 @@ namespace Program
                     else
                     {
                         //This is a delta time command
-                        Console.WriteLine("Interpreted a delta time instruction outside the finishedInstruction() method, this should not be happenning!");
+                        Console.WriteLine("Interpreted a delta time instruction outside the finishedInstruction() method, this should not be happenning! Identifier: " + txBuffer[0]);
                         interpretDeltaTime();
                         deltaTimeWait();
                     }
@@ -718,19 +719,56 @@ namespace Program
         static void readCommandStartingWith4D() //THIS METHOD IS ONLY TO BE EXECUTED WHEN 4D IS ENCOUNTERED, DO NOT USE THIS METHOD TO CONTINUE 4D INSTRUCTIONS
         {
             //This message is either a header chunk or a track chunk
-            byte 
+            txBuffer[1] = midiFileReader.ReadByte();
+            txBuffer[2] = midiFileReader.ReadByte();
+            txBuffer[3] = midiFileReader.ReadByte();
+            if(txBuffer[1] == 0x54 && txBuffer[2] == 0x68 && txBuffer[3] == 0x64)
+            {
+                //This is a header chunk, the following bytes are 00 00 00 06
+                for(int i = 4; i <= 7; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                taskInProgress = true; //There is still data to send!
+                lastInstructionType = 0x4D;
+            }
+            else if(txBuffer[1] == 0x54 && txBuffer[2] == 0x72 && txBuffer[3] == 0x6B)
+            {
+                //This is a track chunk, the next four bytes are all that is needed
+                for (int i = 4; i <= 7; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                finishedInstruction();
+            }
+            else
+            {
+                Console.WriteLine("A delta time starting of 4D was found. This is currently not supported.");
+                // OOPS! turns out this was not a header at all. Remedy the situation by turning 4D into a delta time.
+                waitTime += (txBuffer[0] & 0x7f);
+                taskInProgress = true;
+                lastInstructionType = 0x00;
+                // What do we do about the rest of the bits?
+                // No solution for the time being...
+            }
         }
 
-        static void continueHeaderChunk()
+        static void finishHeaderChunk()
         {
-
+            //Only six bytes of the header chunk are left and can be read directly from the file.
+            for(int i = 0; i < 6; i++)
+            {
+                txBuffer[i] = midiFileReader.ReadByte();
+            }
+            txBuffer[6] = 0x00;
+            txBuffer[7] = 0x00;
+            finishedInstruction();
         }
 
         static bool isAnEventCommandCode(byte command)
         {
             //Valid command codes are 8X, 9X, AX, BX, CX, DX, and EX.
-            byte temp = (byte)(command & 0xf0);
-            if(temp == 0x80 || temp == 0x90 || temp == 0xA0 || temp == 0xB0 || temp == 0xC0 || temp == 0xD0 || temp == 0xE0)
+            if(command == 0x80 || command == 0x90 || command == 0xA0 || command == 0xB0 || command == 0xC0 || command == 0xD0 || command == 0xE0)
             {
                 return true;
             }
@@ -742,31 +780,136 @@ namespace Program
 
         static void readMetaEvent()
         {
-
+            byte metaEventIdentifier = midiFileReader.ReadByte();
+            txBuffer[1] = metaEventIdentifier;
+            if(metaEventIdentifier == 0x58)
+            {
+                //Time signature event, length is five bytes.
+                for(int i = 2; i <= 6; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                txBuffer[7] = 0x00;
+                finishedInstruction();
+            }
+            else if(metaEventIdentifier == 0x51)
+            {
+                //Set tempo event, length is four bytes.
+                for(int i = 2; i <= 5; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                txBuffer[6] = 0x00;
+                txBuffer[7] = 0x00;
+                finishedInstruction();
+            }
+            else if(metaEventIdentifier == 0x03)
+            {
+                //This is the track name, it's length is variable.
+                txBuffer[2] = midiFileReader.ReadByte();
+                numOfBytesLeftInMessage = (int)txBuffer[2];
+                int i = 3;
+                while(numOfBytesLeftInMessage != 0 && i <= 7)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                    i++;
+                    numOfBytesLeftInMessage--;
+                }
+                if(numOfBytesLeftInMessage != 0)
+                {
+                    //We ran out of space in our message!
+                    taskInProgress = true;
+                    lastInstructionType = 0xFF;
+                }
+                else
+                {
+                    //We had enough space in one message.
+                    finishedInstruction();
+                }
+            }
+            else if(metaEventIdentifier == 0x2F)
+            {
+                //End of track. Length one byte
+                for(int i = 2; i <=7; i++)
+                {
+                    txBuffer[i] = 0x00;
+                }
+                finishedInstruction();
+            }
+            else
+            {
+                Console.WriteLine("Unexpected meta event identifier: " + metaEventIdentifier);
+            }
         }
 
         static void readEventCommand(byte command)
         {
-
+            if(command == 0xC0)
+            {
+                //Program change command, the next byte is the new program number.
+                txBuffer[0] = command;
+                txBuffer[1] = midiFileReader.ReadByte();
+                for(int i = 2; i <= 7; i++)
+                {
+                    txBuffer[i] = 0x00;
+                }
+                finishedInstruction();
+            }
+            else if(command == 0x90)
+            {
+                //Note on command, the length is two bytes after the command identifier.
+                txBuffer[0] = command;
+                for(int i = 1; i <= 2; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                for(int j = 3; j <= 7; j++)
+                {
+                    txBuffer[j] = 0x00;
+                }
+                finishedInstruction();
+            }
+            else if(command == 0x80)
+            {
+                //Note off command, the length is two bytes after the command identifier.
+                txBuffer[0] = command;
+                for (int i = 1; i <= 2; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                for (int j = 3; j <= 7; j++)
+                {
+                    txBuffer[j] = 0x00;
+                }
+                finishedInstruction();
+            }
+            else
+            {
+                Console.WriteLine("An invalid command got through the check to see if the byte is a valid command.");
+            }
         }
 
         static void continuePreviousTask()
         {
+            //No need to check for command codes, they are only four or six bytes.
             if(lastInstructionType == 0x00) //0x00 means a wait instruction is in progress.
             {
+                //Console.WriteLine("Waiting for " + waitTime + " ticks...");
                 deltaTimeWait();
-            }
-            else if(isAnEventCommandCode(lastInstructionType)) //This should never happen given that midi commands are only four or six bytes.
-            {
-
             }
             else if(lastInstructionType == 0x4D)
             {
-                
+                finishHeaderChunk();
             }
-            else if(lastInstructionType == 0xFF) //Need a second byte for last instruction type for meta events
+            else if(lastInstructionType == 0xFF) //0xFF means a meta event needed more bytes in order to send all its data (presumably text)
             {
-
+                finishSendingDataFromMetaEvent();
+            }
+            else if(lastInstructionType == 0x4E) //This is the state for cases where interpretDeltaTime accidentally read the 4D of the header chunk and though it was a delta time
+            {
+                //Assume the byte was already read and was 4D.
+                txBuffer[0] = 0x4D;
+                readCommandStartingWith4D();
             }
             else
             {
@@ -774,23 +917,69 @@ namespace Program
             }
         }
 
+        static void finishSendingDataFromMetaEvent()
+        {
+            int i = 0;
+            while(numOfBytesLeftInMessage != 0 && i <= 7)
+            {
+                txBuffer[i] = midiFileReader.ReadByte();
+                numOfBytesLeftInMessage--;
+                i++;
+            }
+            for(; i <= 7; i++)
+            {
+                txBuffer[i] = 0x00;
+            }
+            if(numOfBytesLeftInMessage == 0)
+            {
+                finishedInstruction();
+            }
+            else
+            {
+                //We will continue on the next cycle.
+            }
+        }
+
         static void interpretDeltaTime()
         {
-            long i = 0;
-            do
+            byte currentByte = midiFileReader.ReadByte();
+            // ONE SPECIAL CASE TO CONSIDER: Header chunks and track chunks DO NOT have a delta time before them.
+            // We check if the current byte is 4D. If it is, we might be accidentally reading part of a header!
+            if(currentByte == 0x4D)
             {
-                waitTime += ((txBuffer[0] & 0x7f) * (i*256));
-                txBuffer[0] = midiFileReader.ReadByte();
-                i++;
-            } while ((txBuffer[0] & 0x80) != 0);
-            taskInProgress = true;
-            lastInstructionType = 0x00;
+                taskInProgress = true;
+                lastInstructionType = 0x4E; //0x4E is 0x4D but for the state where intepretDeltaTime has made a mistake!
+            }
+            else
+            {
+                int i = 0;
+                do
+                {
+                    waitTime += ((currentByte & 0x7f) * (long)(Math.Pow(256, i)));
+                    if((currentByte & 0x80) != 0)
+                    {
+                        currentByte = midiFileReader.ReadByte();
+                    }
+                    i++;
+                    
+                } while ((currentByte & 0x80) != 0);
+                if (waitTime != 0)
+                {
+                    taskInProgress = true;
+                    lastInstructionType = 0x00;
+                }
+                else
+                {
+                    taskInProgress = false;
+                }
+            }
         }
 
         static void deltaTimeWait()
         {
             if(waitTime <= 0)
             {
+                waitTime = 0;
                 taskInProgress = false;
             }
             else
@@ -809,8 +998,6 @@ namespace Program
         static void finishedInstruction()
         {
             interpretDeltaTime();
-            taskInProgress = true;
-            lastInstructionType = 0x00;
         }
     }
 }
