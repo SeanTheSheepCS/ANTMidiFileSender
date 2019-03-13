@@ -60,7 +60,7 @@ namespace Program
         /*
          * New variables introduced in order to send the midi file. 
          */
-        static string midiFileName = "C4.mid";
+        static string midiFileName = "C4 - Modified.mid";
         static System.IO.BinaryReader midiFileReader;
         static bool taskInProgress;
         static byte lastInstructionType;
