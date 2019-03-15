@@ -60,12 +60,15 @@ namespace Program
         /*
          * New variables introduced in order to send the midi file. 
          */
-        static string midiFileName = "C4 - Modified.mid";
+        //static string midiFileName = "C4 - Modified.mid";
+        //static string midiFileName = "CMajorScale.mid";
+        static string midiFileName = "CMajorScaleVersionTwo.mid";
         static System.IO.BinaryReader midiFileReader;
         static bool taskInProgress;
         static byte lastInstructionType;
         static long numOfBytesLeftInMessage;
         static long waitTime;
+        static byte octavesShifted = 0;
 
 
         ////////////////////////////////////////////////////////////////////////////////
@@ -686,6 +689,7 @@ namespace Program
                 {
                     txBuffer[0] = midiFileReader.ReadByte();
                     byte temp = (byte)(txBuffer[0] & 0xF0);
+                    Console.WriteLine("New Instruction Started!");
                     if (txBuffer[0] == 0x4D)
                     {
                         readCommandStartingWith4D();
@@ -836,6 +840,19 @@ namespace Program
                 }
                 finishedInstruction();
             }
+            else if(metaEventIdentifier == 0x59)
+            {
+                //Key signature, I am going to discard this for the time being.
+                for (int i = 2; i <= 4; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                for (int j = 5; j <= 7; j++)
+                {
+                    txBuffer[j] = 0x00;
+                }
+                finishedInstruction();
+            }
             else
             {
                 Console.WriteLine("Unexpected meta event identifier: " + metaEventIdentifier);
@@ -855,14 +872,39 @@ namespace Program
                 }
                 finishedInstruction();
             }
+            else if(command == 0xB0)
+            {
+                //Control change, two bytes after command byte.
+                txBuffer[0] = command;
+                for(int i = 1; i <=2; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                for(int j = 3; j <= 7; j++)
+                {
+                    txBuffer[j] = 0x00;
+                }
+                finishedInstruction();
+            }
             else if(command == 0x90)
             {
                 //Note on command, the length is two bytes after the command identifier.
                 txBuffer[0] = command;
-                for(int i = 1; i <= 2; i++)
+                
+                byte tentativeNote = (byte)(midiFileReader.ReadByte() + (octavesShifted * 32));
+                while(tentativeNote < 48)
                 {
-                    txBuffer[i] = midiFileReader.ReadByte();
+                    octavesShifted++;
+                    tentativeNote = (byte)(tentativeNote + 32);
                 }
+                while(tentativeNote > 95)
+                {
+                    octavesShifted--;
+                    tentativeNote = (byte)(tentativeNote - 32);
+                }
+                
+                txBuffer[1] = (byte)(tentativeNote);
+                txBuffer[2] = midiFileReader.ReadByte();
                 for(int j = 3; j <= 7; j++)
                 {
                     txBuffer[j] = 0x00;
@@ -873,10 +915,8 @@ namespace Program
             {
                 //Note off command, the length is two bytes after the command identifier.
                 txBuffer[0] = command;
-                for (int i = 1; i <= 2; i++)
-                {
-                    txBuffer[i] = midiFileReader.ReadByte();
-                }
+                txBuffer[1] = (byte)(midiFileReader.ReadByte() + (octavesShifted * 32));
+                txBuffer[2] = midiFileReader.ReadByte();
                 for (int j = 3; j <= 7; j++)
                 {
                     txBuffer[j] = 0x00;
@@ -984,6 +1024,7 @@ namespace Program
             }
             else
             {
+                Console.WriteLine("Wait...");
                 taskInProgress = true;
                 lastInstructionType = 0x00;
                 waitTime = waitTime - 10; //INCREMENT BY TEN TICKS EVERY 1/4 SECOND
