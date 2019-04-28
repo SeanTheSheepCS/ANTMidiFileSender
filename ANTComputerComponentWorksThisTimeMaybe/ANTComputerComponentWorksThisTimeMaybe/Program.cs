@@ -60,9 +60,6 @@ namespace Program
         /*
          * New variables introduced in order to send the midi file. 
          */
-        //static string midiFileName = "C4 - Modified.mid";
-        //static string midiFileName = "CMajorScale.mid";
-        static string midiFileName = "CMajorScaleVersionTwo.mid";
         static System.IO.BinaryReader midiFileReader;
         static bool taskInProgress;
         static byte lastInstructionType;
@@ -102,7 +99,7 @@ namespace Program
             try
             {
                 Init();
-                midiFileReader = new System.IO.BinaryReader(new System.IO.FileStream(midiFileName, System.IO.FileMode.Open));
+                selectTrack();
                 Start(ucChannelType);
                 midiFileReader.Close();
             }
@@ -677,6 +674,51 @@ namespace Program
          * This code is made to send a midi file piecewise through ANT.
          * 
          */
+        
+
+        static String getTrackDirectory()
+        {
+            String DebugDir = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+            String binDir = System.IO.Directory.GetParent(DebugDir).FullName;
+            String innerAntCCDir = System.IO.Directory.GetParent(binDir).FullName;
+            String outerAntCCDir = System.IO.Directory.GetParent(innerAntCCDir).FullName;
+            String AntMidiFileSenderDir = System.IO.Directory.GetParent(outerAntCCDir).FullName;
+            String trackDir = AntMidiFileSenderDir + "/Tracks";
+            Console.WriteLine(trackDir);
+            return trackDir;
+        }
+
+        static void initializeTrackList()
+        {
+
+        }
+
+        static void selectTrack()
+        {
+            printSelectTrackMenu();
+            getUserInput();
+            String pathToTrack = selectTrackAccordingly();
+
+            midiFileReader = new System.IO.BinaryReader(new System.IO.FileStream(pathToTrack, System.IO.FileMode.Open));
+
+            void printSelectTrackMenu()
+            {
+
+            }
+
+            void getUserInput()
+            {
+
+            }
+
+            String selectTrackAccordingly()
+            {
+                String result = getTrackDirectory() + "/TestTracks/CMajorScaleVersionTwo.mid";
+                Console.WriteLine(result);
+                return result;
+            }
+        }
+
         static void prepareNextTxBufferMessage()
         {
             try
