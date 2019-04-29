@@ -897,40 +897,33 @@ namespace Program
         {
             byte metaEventIdentifier = midiFileReader.ReadByte();
             txBuffer[1] = metaEventIdentifier;
-            if(metaEventIdentifier == 0x58)
+            if(metaEventIdentifier == 0x00)
             {
-                //Time signature event, length is five bytes.
-                for(int i = 2; i <= 6; i++)
+                //This sets the track's sequence number, the length of the command is three bytes
+                for (int i = 2; i <= 5; i++)
                 {
                     txBuffer[i] = midiFileReader.ReadByte();
                 }
-                txBuffer[7] = 0x00;
-                finishedInstruction();
-            }
-            else if(metaEventIdentifier == 0x51)
-            {
-                //Set tempo event, length is four bytes.
-                for(int i = 2; i <= 5; i++)
+                for (int j = 6; j <= 7; j++)
                 {
-                    txBuffer[i] = midiFileReader.ReadByte();
+                    txBuffer[j] = 0x00;
                 }
-                txBuffer[6] = 0x00;
-                txBuffer[7] = 0x00;
                 finishedInstruction();
             }
-            else if(metaEventIdentifier == 0x03)
+            else if (metaEventIdentifier == 0x01)
             {
-                //This is the track name, it's length is variable.
+                //This is a text event
                 txBuffer[2] = midiFileReader.ReadByte();
                 numOfBytesLeftInMessage = (int)txBuffer[2];
+                Console.WriteLine(numOfBytesLeftInMessage);
                 int i = 3;
-                while(numOfBytesLeftInMessage != 0 && i <= 7)
+                while (numOfBytesLeftInMessage != 0 && i <= 7)
                 {
                     txBuffer[i] = midiFileReader.ReadByte();
                     i++;
                     numOfBytesLeftInMessage--;
                 }
-                if(numOfBytesLeftInMessage != 0)
+                if (numOfBytesLeftInMessage != 0)
                 {
                     //We ran out of space in our message!
                     taskInProgress = true;
@@ -942,7 +935,7 @@ namespace Program
                     finishedInstruction();
                 }
             }
-            else if(metaEventIdentifier == 0x02)
+            else if (metaEventIdentifier == 0x02)
             {
                 //This is copyright information, it's length is variable.
                 txBuffer[2] = midiFileReader.ReadByte();
@@ -967,18 +960,91 @@ namespace Program
                     finishedInstruction();
                 }
             }
-            else if(metaEventIdentifier == 0x2F)
+            else if (metaEventIdentifier == 0x03)
+            {
+                //This is the track name, it's length is variable.
+                txBuffer[2] = midiFileReader.ReadByte();
+                numOfBytesLeftInMessage = (int)txBuffer[2];
+                int i = 3;
+                while (numOfBytesLeftInMessage != 0 && i <= 7)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                    i++;
+                    numOfBytesLeftInMessage--;
+                }
+                if (numOfBytesLeftInMessage != 0)
+                {
+                    //We ran out of space in our message!
+                    taskInProgress = true;
+                    lastInstructionType = 0xFF;
+                }
+                else
+                {
+                    //We had enough space in one message.
+                    finishedInstruction();
+                }
+            }
+            else if(metaEventIdentifier == 0x04 || metaEventIdentifier == 0x05 || metaEventIdentifier == 0x06 || metaEventIdentifier == 0x07)
+            {
+                //0x04 denotes a track instrument name
+                //0x05 denotes a lyric
+                //0x06 denotes a marker
+                //0x07 denotes a cue point
+                //All are treated like text events
+                txBuffer[2] = midiFileReader.ReadByte();
+                numOfBytesLeftInMessage = (int)txBuffer[2];
+                int i = 3;
+                while (numOfBytesLeftInMessage != 0 && i <= 7)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                    i++;
+                    numOfBytesLeftInMessage--;
+                }
+                if (numOfBytesLeftInMessage != 0)
+                {
+                    //We ran out of space in our message!
+                    taskInProgress = true;
+                    lastInstructionType = 0xFF;
+                }
+                else
+                {
+                    //We had enough space in one message.
+                    finishedInstruction();
+                }
+            }
+            else if (metaEventIdentifier == 0x2F)
             {
                 //End of track. Length one byte
-                for(int i = 2; i <=7; i++)
+                for (int i = 2; i <= 7; i++)
                 {
                     txBuffer[i] = 0x00;
                 }
                 finishedInstruction();
             }
-            else if(metaEventIdentifier == 0x59)
+            else if(metaEventIdentifier == 0x51)
             {
-                //Key signature, I am going to discard this for the time being.
+                //Set tempo event, length is four bytes.
+                for(int i = 2; i <= 5; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                txBuffer[6] = 0x00;
+                txBuffer[7] = 0x00;
+                finishedInstruction();
+            }
+            if (metaEventIdentifier == 0x58)
+            {
+                //Time signature event, length is five bytes.
+                for (int i = 2; i <= 6; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                txBuffer[7] = 0x00;
+                finishedInstruction();
+            }
+            else if (metaEventIdentifier == 0x59)
+            {
+                //Key signature.
                 for (int i = 2; i <= 4; i++)
                 {
                     txBuffer[i] = midiFileReader.ReadByte();
@@ -988,6 +1054,30 @@ namespace Program
                     txBuffer[j] = 0x00;
                 }
                 finishedInstruction();
+            }
+            else if(metaEventIdentifier == 0x7F)
+            {
+                //Sequencer specific information! Same process as text, interpretation is up to the player
+                txBuffer[2] = midiFileReader.ReadByte();
+                numOfBytesLeftInMessage = (int)txBuffer[2];
+                int i = 3;
+                while (numOfBytesLeftInMessage != 0 && i <= 7)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                    i++;
+                    numOfBytesLeftInMessage--;
+                }
+                if (numOfBytesLeftInMessage != 0)
+                {
+                    //We ran out of space in our message!
+                    taskInProgress = true;
+                    lastInstructionType = 0xFF;
+                }
+                else
+                {
+                    //We had enough space in one message.
+                    finishedInstruction();
+                }
             }
             else
             {
@@ -1199,7 +1289,7 @@ namespace Program
             }
             else
             {
-                Console.WriteLine("Wait...");
+                Console.WriteLine("Wait for another " + waitTime/10 + " ticks...");
                 taskInProgress = true;
                 lastInstructionType = 0x00;
                 waitTime = waitTime - 10; //INCREMENT BY TEN TICKS EVERY 1/4 SECOND
