@@ -43,7 +43,7 @@ namespace Program
         static readonly byte USER_TRANSTYPE = 4;           // Transmission type
 
         static readonly byte USER_RADIOFREQ = 81;          // RF Frequency + 2400 MHz
-        static readonly ushort USER_CHANNELPERIOD = 8192;  // Channel Period (8192/32768)s period = 4Hz
+        static readonly ushort USER_CHANNELPERIOD = 4096;  // Channel Period (4096/32768)s period = 4Hz
 
         static readonly byte[] USER_NETWORK_KEY = { 0, 0, 0, 0, 0, 0, 0, 0 };
         static readonly byte USER_NETWORK_NUM = 0;         // The network key is assigned to this network number
@@ -1032,7 +1032,7 @@ namespace Program
                 txBuffer[7] = 0x00;
                 finishedInstruction();
             }
-            if (metaEventIdentifier == 0x58)
+            else if (metaEventIdentifier == 0x58)
             {
                 //Time signature event, length is five bytes.
                 for (int i = 2; i <= 6; i++)
