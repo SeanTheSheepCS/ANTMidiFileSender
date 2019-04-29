@@ -683,7 +683,7 @@ namespace Program
             String innerAntCCDir = System.IO.Directory.GetParent(binDir).FullName;
             String outerAntCCDir = System.IO.Directory.GetParent(innerAntCCDir).FullName;
             String AntMidiFileSenderDir = System.IO.Directory.GetParent(outerAntCCDir).FullName;
-            String trackDir = AntMidiFileSenderDir + "/Tracks";
+            String trackDir = System.IO.Path.Combine(AntMidiFileSenderDir, "Tracks");
             Console.WriteLine(trackDir);
             return trackDir;
         }
@@ -695,27 +695,95 @@ namespace Program
 
         static void selectTrack()
         {
-            printSelectTrackMenu();
-            getUserInput();
-            String pathToTrack = selectTrackAccordingly();
-
-            midiFileReader = new System.IO.BinaryReader(new System.IO.FileStream(pathToTrack, System.IO.FileMode.Open));
-
-            void printSelectTrackMenu()
+            String pathToFile = getTrackDirectory();
+            while(!pathToFile.Contains("."))
             {
+                List<String> fileList = getFileList(pathToFile);
+                printNavigationMenu(fileList);
+                int selection = getUserSelectedIndex(fileList);
+                if(selection == 0)
+                {
+                    pathToFile = System.IO.Directory.GetParent(pathToFile).FullName;
+                }
+                else
+                {
+                    pathToFile = System.IO.Path.Combine(pathToFile, fileList.ElementAt(selection));
+                }
+            }
+            midiFileReader = new System.IO.BinaryReader(new System.IO.FileStream(pathToFile, System.IO.FileMode.Open));
 
+            void printNavigationMenu(List<String> fileList)
+            {
+                for(int i = 0; i < fileList.Count; i++)
+                {
+                    int displayedValue = i + 1;
+                    Console.WriteLine(displayedValue + ". " + fileList.ElementAt(i));
+                }
             }
 
-            void getUserInput()
+            List<String> getFileList(String currentDirectory)
             {
+                List<String> dirList = new List<String>(System.IO.Directory.EnumerateDirectories(currentDirectory));
+                List<String> fileList = new List<String>(System.IO.Directory.EnumerateFiles(currentDirectory));
+                dirList.Sort();
+                fileList.Sort();
 
+                List<String> everythingList = new List<String>();
+                everythingList.Add("Go back one file");
+                for(int i = 0; i < dirList.Count; i++)
+                {
+                    everythingList.Add(dirList.ElementAt(i));
+                }
+                for(int j = 0; j < fileList.Count; j++)
+                {
+                    if(fileList.ElementAt(j).Contains(".mid"))
+                    {
+                        everythingList.Add(fileList.ElementAt(j));
+                    }
+                }
+                return everythingList;
             }
 
-            String selectTrackAccordingly()
+            int getUserSelectedIndex(List<String> fileList)
             {
-                String result = getTrackDirectory() + "/TestTracks/CMajorScaleVersionTwo.mid";
-                Console.WriteLine(result);
-                return result;
+                bool validInputGiven = false;
+                int selection = 1;
+                int index = 0;
+                while(!validInputGiven)
+                {
+                    Console.WriteLine("Please make a selection.");
+                    String userInput = Console.ReadLine();
+                    try
+                    {
+                        selection = Int32.Parse(userInput);
+                        if(selection <= 0)
+                        {
+                            Console.WriteLine("Numbers smaller than one are invalid.");
+                        }
+                        else if(selection > fileList.Count)
+                        {
+                            Console.WriteLine("Your selected number was too large.");
+                        }
+                        else
+                        {
+                            index = selection - 1;
+                            validInputGiven = true;
+                        }
+                    }
+                    catch(FormatException fe)
+                    {
+                        Console.WriteLine("Please enter an integer.");
+                    }
+                    catch(ArgumentNullException ane)
+                    {
+                        Console.WriteLine("Please enter an integer");
+                    }
+                    catch(Exception e)
+                    {
+                        Console.WriteLine("An unexpected error occurred while processing your input. Please try again.");
+                    }
+                }
+                return index;
             }
         }
 
@@ -731,6 +799,7 @@ namespace Program
                 {
                     txBuffer[0] = midiFileReader.ReadByte();
                     byte temp = (byte)(txBuffer[0] & 0xF0);
+                    Console.WriteLine(temp);
                     Console.WriteLine("New Instruction Started!");
                     if (txBuffer[0] == 0x4D)
                     {
@@ -873,6 +942,31 @@ namespace Program
                     finishedInstruction();
                 }
             }
+            else if(metaEventIdentifier == 0x02)
+            {
+                //This is copyright information, it's length is variable.
+                txBuffer[2] = midiFileReader.ReadByte();
+                numOfBytesLeftInMessage = (int)txBuffer[2];
+                Console.WriteLine(numOfBytesLeftInMessage);
+                int i = 3;
+                while (numOfBytesLeftInMessage != 0 && i <= 7)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                    i++;
+                    numOfBytesLeftInMessage--;
+                }
+                if (numOfBytesLeftInMessage != 0)
+                {
+                    //We ran out of space in our message!
+                    taskInProgress = true;
+                    lastInstructionType = 0xFF;
+                }
+                else
+                {
+                    //We had enough space in one message.
+                    finishedInstruction();
+                }
+            }
             else if(metaEventIdentifier == 0x2F)
             {
                 //End of track. Length one byte
@@ -903,7 +997,72 @@ namespace Program
 
         static void readEventCommand(byte command)
         {
-            if(command == 0xC0)
+            if (command == 0x80)
+            {
+                //Note off command, the length is two bytes after the command identifier.
+                txBuffer[0] = command;
+                txBuffer[1] = (byte)(midiFileReader.ReadByte() + (octavesShifted * 32));
+                txBuffer[2] = midiFileReader.ReadByte();
+                for (int j = 3; j <= 7; j++)
+                {
+                    txBuffer[j] = 0x00;
+                }
+                finishedInstruction();
+            }
+            else if (command == 0x90)
+            {
+                //Note on command, the length is two bytes after the command identifier.
+                txBuffer[0] = command;
+
+                byte tentativeNote = (byte)(midiFileReader.ReadByte() + (octavesShifted * 32));
+                while (tentativeNote < 48)
+                {
+                    octavesShifted++;
+                    tentativeNote = (byte)(tentativeNote + 32);
+                }
+                while (tentativeNote > 95)
+                {
+                    octavesShifted--;
+                    tentativeNote = (byte)(tentativeNote - 32);
+                }
+
+                txBuffer[1] = (byte)(tentativeNote);
+                txBuffer[2] = midiFileReader.ReadByte();
+                for (int j = 3; j <= 7; j++)
+                {
+                    txBuffer[j] = 0x00;
+                }
+                finishedInstruction();
+            }
+            else if (command == 0xA0)
+            {
+                //Key after-touch, two bytes after command byte.
+                txBuffer[0] = command;
+                for (int i = 1; i <= 2; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                for (int j = 3; j <= 7; j++)
+                {
+                    txBuffer[j] = 0x00;
+                }
+                finishedInstruction();
+            }
+            else if (command == 0xB0)
+            {
+                //Control change, two bytes after command byte.
+                txBuffer[0] = command;
+                for (int i = 1; i <= 2; i++)
+                {
+                    txBuffer[i] = midiFileReader.ReadByte();
+                }
+                for (int j = 3; j <= 7; j++)
+                {
+                    txBuffer[j] = 0x00;
+                }
+                finishedInstruction();
+            }
+            else if (command == 0xC0)
             {
                 //Program change command, the next byte is the new program number.
                 txBuffer[0] = command;
@@ -914,51 +1073,25 @@ namespace Program
                 }
                 finishedInstruction();
             }
-            else if(command == 0xB0)
+            else if (command == 0xD0)
             {
-                //Control change, two bytes after command byte.
+                //Channel after-touch, one byte in length
                 txBuffer[0] = command;
-                for(int i = 1; i <=2; i++)
+                txBuffer[1] = midiFileReader.ReadByte();
+                for (int i = 2; i <= 7; i++)
+                {
+                    txBuffer[i] = 0x00;
+                }
+                finishedInstruction();
+            }
+            else if(command == 0xE0)
+            {
+                //Pitch wheel change, two bytes in length
+                txBuffer[0] = command;
+                for (int i = 1; i <= 2; i++)
                 {
                     txBuffer[i] = midiFileReader.ReadByte();
                 }
-                for(int j = 3; j <= 7; j++)
-                {
-                    txBuffer[j] = 0x00;
-                }
-                finishedInstruction();
-            }
-            else if(command == 0x90)
-            {
-                //Note on command, the length is two bytes after the command identifier.
-                txBuffer[0] = command;
-                
-                byte tentativeNote = (byte)(midiFileReader.ReadByte() + (octavesShifted * 32));
-                while(tentativeNote < 48)
-                {
-                    octavesShifted++;
-                    tentativeNote = (byte)(tentativeNote + 32);
-                }
-                while(tentativeNote > 95)
-                {
-                    octavesShifted--;
-                    tentativeNote = (byte)(tentativeNote - 32);
-                }
-                
-                txBuffer[1] = (byte)(tentativeNote);
-                txBuffer[2] = midiFileReader.ReadByte();
-                for(int j = 3; j <= 7; j++)
-                {
-                    txBuffer[j] = 0x00;
-                }
-                finishedInstruction();
-            }
-            else if(command == 0x80)
-            {
-                //Note off command, the length is two bytes after the command identifier.
-                txBuffer[0] = command;
-                txBuffer[1] = (byte)(midiFileReader.ReadByte() + (octavesShifted * 32));
-                txBuffer[2] = midiFileReader.ReadByte();
                 for (int j = 3; j <= 7; j++)
                 {
                     txBuffer[j] = 0x00;
