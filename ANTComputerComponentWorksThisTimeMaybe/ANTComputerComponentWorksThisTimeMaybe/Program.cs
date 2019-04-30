@@ -43,7 +43,7 @@ namespace Program
         static readonly byte USER_TRANSTYPE = 4;           // Transmission type
 
         static readonly byte USER_RADIOFREQ = 81;          // RF Frequency + 2400 MHz
-        static readonly ushort USER_CHANNELPERIOD = 4096;  // Channel Period (4096/32768)s period = 4Hz
+        static readonly ushort USER_CHANNELPERIOD = 4096;  // Channel Period (4096/32768)s period = 8Hz
 
         static readonly byte[] USER_NETWORK_KEY = { 0, 0, 0, 0, 0, 0, 0, 0 };
         static readonly byte USER_NETWORK_NUM = 0;         // The network key is assigned to this network number
@@ -688,11 +688,6 @@ namespace Program
             return trackDir;
         }
 
-        static void initializeTrackList()
-        {
-
-        }
-
         static void selectTrack()
         {
             String pathToFile = getTrackDirectory();
@@ -799,7 +794,6 @@ namespace Program
                 {
                     txBuffer[0] = midiFileReader.ReadByte();
                     byte temp = (byte)(txBuffer[0] & 0xF0);
-                    Console.WriteLine(temp);
                     Console.WriteLine("New Instruction Started!");
                     if (txBuffer[0] == 0x4D)
                     {
